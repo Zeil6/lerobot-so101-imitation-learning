@@ -1,82 +1,73 @@
-# ACT 与 Diffusion Policy：基于 SO-101 复刻的算法理解
+# ACT 与 Diffusion Policy：从实现到 SO-101 真机现象
 
-这个分支整理我在同一套 SO-101 双摄像头数据上复刻 ACT 和 Diffusion Policy 后形成的理解。目标不是给两种算法排绝对名次，而是解释它们如何使用示范、为什么部署行为不同，以及哪些工程变量会改变结论。
+这个分支整理我在 `Grab the glue` 任务中复刻 ACT 与 Diffusion Policy 后形成的算法理解。内容从双摄像头图像、机器人状态和动作示范出发，继续追到 LeRobot 的配置类、Policy 接口、训练损失和动作队列，并与原始论文及官方代码核对。
+
+这里不会用单次视频替代定量实验，也不把当前上游源码默认值当成我训练 checkpoint 的实际配置。凡是“实验观察”“本次源码核对”“论文/原始代码结论”和“尚未验证的推断”，均尽量分开表述。
 
 [返回 `main` 项目导航](https://github.com/Zeil6/lerobot-so101-imitation-learning/tree/main)
 
-## 共同问题：从示范学习动作
+## 两个算法入口
 
-两者都属于模仿学习策略。数据样本包含 `handeye`、`fixed` 图像，机器人状态和操作者给出的动作。训练希望策略在相似观测下生成与示范相符的动作。
+| 入口 | 主要问题 | 与真机记录的连接 |
+| --- | --- | --- |
+| [ACT：动作分块、CVAE 与 Temporal Ensembling](docs/act.md) | `ACTPolicy.forward()` 与 `select_action()` 为什么不同；一个 chunk 如何训练、生成和消费 | 10 个 episode、双摄像头、CUDA OOM、视频中动作相对连续 |
+| [Diffusion Policy：动作去噪、scheduler 与动作队列](docs/diffusion_policy.md) | 动作怎样加噪与去噪；`horizon`、`n_obs_steps`、`n_action_steps` 和推理步数如何共同影响控制 | 同一组 10-episode 数据、重新采集的 50-episode 数据、DDIM 16 步后的抽动变化 |
 
-对 `Grab the glue` 来说，它们都没有因为任务文本就获得完整抓取知识。模型能学到什么仍受示范覆盖、视角、动作一致性和部署输入影响。
+补充入口：
 
-## 核心对比
+- [ACT 与 Diffusion Policy 实现对比](docs/implementation_comparison.md)
+- [源码版本、论文与固定链接](docs/source_reference.md)
+
+## 我现在怎样理解两条数据流
+
+两种策略都使用示范学习，但“动作序列如何成为模型输出”不同：
+
+```mermaid
+flowchart TD
+    O["双相机图像 + 机器人状态"] --> A["ACT 条件特征"]
+    O --> D["Diffusion 条件特征"]
+    A --> C["一次生成 action chunk"]
+    D --> N["多轮 scheduler step 去噪"]
+    C --> Q1["队列或 Temporal Ensembling"]
+    N --> Q2["截取 n_action_steps 放入队列"]
+    Q1 --> R["SO-101 Follower"]
+    Q2 --> R
+```
+
+ACT 当前实现用动作重建损失，并在启用 CVAE 时加入 KL 项；Diffusion Policy 则在随机 diffusion timestep 上学习预测噪声（默认 `epsilon`）或干净样本。两者都能输出一段动作，但 ACT 通常一次模型调用得到 chunk，而扩散策略每次生成新 chunk 要反复调用去噪网络。
+
+## 快速对比
 
 | 维度 | ACT | Diffusion Policy |
 | --- | --- | --- |
-| 核心表示 | 一次预测 action chunk | 从噪声逐步恢复动作序列 |
-| 训练目标 | 学习示范动作块，通常基于动作重建并结合其模型结构目标 | 学习加入噪声后的预测噪声/去噪方向 |
-| 推理 | 通常一次前向传播产生动作块 | 多轮反向去噪产生动作块 |
-| 多模态 | 容易受回归目标与表示方式限制 | 能表达多种合理动作模式 |
-| 实时性 | 在本任务中更直接，推理链路相对短 | 对采样步数、AMP 和动作队列更敏感 |
-| 连续性 | action chunk + Temporal Ensembling 有助于平滑 | 新噪声采样与块边界可能引入差异，需要协调队列与融合 |
-| 视觉预处理 | 敏感；训练部署必须一致 | 同样敏感；随机/中心裁剪差异尤其需要检查 |
-| 当前观察 | 真机动作相对连续 | 初始有周期性停顿；DDIM 16 步后明显减小 |
+| 序列建模 | Transformer 直接预测 action chunk | 条件 1D U-Net 迭代恢复动作序列 |
+| 训练目标 | masked L1；启用 CVAE 时再加 `kl_weight × KL` | 对 `epsilon` 或 `sample` 的 MSE |
+| 推理 latent | CVAE latent 取零，不再读取真实动作 | 从随机动作噪声开始 |
+| 执行动作 | 普通队列消费 `n_action_steps`，或逐步做 Temporal Ensembling | 从 `horizon` 中截取 `n_action_steps` 放入队列 |
+| 推理成本 | 通常一次前向生成一个 chunk | 每次生成 chunk 需要多轮 scheduler step |
+| 多模态来源 | CVAE 对动作序列分布建模 | 扩散生成过程对动作分布建模 |
+| 当前视频观察 | 10-episode 模型动作相对连续 | 10-episode 初版分段明显；50-episode 仍有轻微抽动；DDIM 16 步后抽动周期明显减小 |
 
-## ACT：把未来一小段一起预测
+“动作相对连续”不是成功率；“DDIM 16 步后周期减小”也不是动作连续性已经完全解决。完整比较见[实现对比](docs/implementation_comparison.md)。
 
-`chunk_size` 是一次预测的动作序列长度。对胶水抓取而言，这相当于把“向目标靠近”的一小段轨迹共同建模，而不是每帧独立猜一个动作。Transformer 建立视觉、机器人状态和动作序列内部的关系。
+## 版本边界
 
-相邻时刻预测出的 chunks 会重叠，Temporal Ensembling 可以融合指向同一未来时刻的预测，使动作更平滑。代价是 chunk 越长，开环执行倾向越强；分布外偏差和错误累积仍然存在。
+本次源码核对日期为 **2026-07-16**：
 
-## Diffusion Policy：从随机动作逐步去噪
+- LeRobot：[`3f2179f`](https://github.com/huggingface/lerobot/tree/3f2179f3b69708b6ad009b2e7685dd9d05269ee1)
+- ACT 原始官方代码：[`742c753`](https://github.com/tonyzhaozh/act/tree/742c753c0d4a5d87076c8f69e5628c79a8cc5488)
+- Diffusion Policy 原始官方代码：[`5ba07ac`](https://github.com/real-stanford/diffusion_policy/tree/5ba07ac6661db573af695b419a7947ecb704690f)
 
-训练时把真实动作序列逐步加噪，网络在视觉和状态条件下学习如何去掉噪声。推理从随机噪声开始，通过多轮去噪恢复候选动作序列。
+这些 SHA 是“本次整理时检查的基线”，不等同于我当时训练使用的精确 LeRobot SHA。一个已经确认的版本差异是：我的实验记录对应版本只接受 `crop_shape`，而本次检查的 LeRobot 上游还包含 `resize_shape` 和 `crop_ratio`。因此文档同时保留实验配置和新源码事实，不用后者回写前者。
 
-这种生成方式能保留多种合理动作模式。例如从胶水左侧或右侧接近都可能成立，而简单平均可能得到并不合理的中间轨迹。但连续控制时，相邻块若采到不同模式，就需要额外关注块边界。
+## 推荐阅读顺序
 
-DDPM 通常采样步骤较多；DDIM 可以用更少步骤完成推理。`num_train_timesteps` 定义训练噪声过程的离散范围，`num_inference_steps` 是部署实际采样步数，两者不能混为同一个概念。
+1. 先读 [ACT](docs/act.md) 或 [Diffusion Policy](docs/diffusion_policy.md) 的独立数据流。
+2. 再读[实现对比](docs/implementation_comparison.md)，把推理耗时、动作块和闭环频率放在同一张表里。
+3. 最后通过[源码与论文索引](docs/source_reference.md)复查文件、类、函数和版本边界。
 
-## 训练与推理的差异
+## 已确认与仍需验证
 
-ACT 学的是动作块的直接预测；Diffusion Policy 学的是条件去噪过程。两者可以读同一个数据集，但权重不能互相转换。
+已确认的实验事实：ACT 和第一版 Diffusion Policy 使用同一组 10 个 episode；第二版 Diffusion Policy 使用重新采集的 50 个 episode；50-episode 模型仍有轻微抽动；改用 DDIM、`num_inference_steps=16` 后抽动周期明显减小。
 
-ACT 一次前向通常比扩散模型多轮去噪更快。在我的机器上，Diffusion Policy 初始 100 步 DDPM 形态与 `n_action_steps=8` 的队列更新产生明显停顿；调整为 DDIM 16 步后周期减小。这说明本次表现不能仅用“哪个算法更好”解释。
-
-## `horizon`、观测与执行窗口
-
-Diffusion Policy 中：
-
-- `horizon` 决定建模的序列范围；
-- `n_obs_steps` 决定使用多少历史观测；
-- `n_action_steps` 决定真正执行多少动作后再更新。
-
-ACT 也面临类似的闭环权衡：预测/执行太短会频繁调用模型，太长则来不及根据新画面纠错。控制频率、推理耗时和动作队列必须一起看。
-
-## 数据要求不能只看数量
-
-| 数据因素 | 影响 |
-| --- | --- |
-| episode 数量 | 增加覆盖机会，但不能自动解决推理延迟 |
-| 示范一致性 | 同一状态下互相冲突的动作会增加学习难度 |
-| 场景覆盖 | 决定策略遇到位置变化、遮挡和偏差时是否见过相似状态 |
-| 双相机同步与语义 | 决定视觉条件是否可靠 |
-| 图像裁剪 | 决定目标、夹爪和工作区是否真正进入模型输入 |
-
-## 当前适用性判断
-
-ACT 在我的单任务 SO-101 场景中表现得更直接、更连续，是一个可靠的工程基线。Diffusion Policy 对部署参数更敏感，但它的多模态表达能力仍值得继续验证。当前问题不能归结为“Diffusion Policy 不适合机械臂”，更准确的判断需要同时控制：
-
-- 推理步数；
-- 动作块长度；
-- 图像预处理；
-- 控制频率；
-- 数据质量与覆盖；
-- GPU 算力和硬件通信。
-
-## 阶段性结论与待验证项
-
-已经有现象支持：ACT 相对连续；Diffusion Policy 的 DDIM 16 步降低了抽动周期；约 50 组数据没有自动消除全部抽动。
-
-仍需验证：严格成功率差异、DDIM 10/16 步的质量—速度权衡、不同 `n_action_steps`、统一裁剪后的重训，以及 Temporal Ensembling/动作块融合各自的独立贡献。
-
+仍需验证：统一条件下的成功率与完成时间、DDIM 10/16 步对比、不同 `n_action_steps`、多个 checkpoint、统一视觉裁剪后的重训，以及 Temporal Ensembling 或动作块融合的独立贡献。π0.5 与 SmolVLA 尚未完成，不属于本分支的成果入口。
