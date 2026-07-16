@@ -46,6 +46,18 @@ flowchart TD
     F --> G[Follower 真机测试]
 ```
 
+## 真机演示
+
+### ACT：10 个 episode
+
+该模型使用 10 个示范 episode 训练，数据集任务为 `Grab the glue`。这 10 个 episode 也被用于第一版 Diffusion Policy 实验，因此 ACT 与第一版 Diffusion Policy 的数据条件较为接近。
+
+[![ACT 10-episode 真机演示封面](assets/images/act_so101_10ep_demo_cover.jpg)](assets/videos/act_so101_10ep_real_robot_demo.mp4)
+
+[▶ 查看 ACT 10-episode SO-101 真机演示](assets/videos/act_so101_10ep_real_robot_demo.mp4)
+
+这段视频用于记录从示范数据采集、ACT 训练、checkpoint 加载到 SO-101 Follower 真机执行的完整链路已经跑通。从视频中可以观察到机械臂动作相对连续，但这只是一次阶段性运行记录，不能据此推导稳定成功率，也不能替代固定条件下的重复测试。
+
 ## 阶段性结论
 
 - ACT 的基本真机模仿学习链路已经跑通。
@@ -59,4 +71,3 @@ flowchart TD
 - 多 checkpoint 的系统性对比，而不是只测试 `last`。
 - 初始位置变化、遮挡和中途偏差后的恢复能力评估。
 - 将实际最终 batch size、训练步数和 checkpoint 名称从原始实验日志补回仓库。
-
