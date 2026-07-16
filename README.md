@@ -1,73 +1,57 @@
-# LeRobot × SO-101 模仿学习复刻记录
+# LeRobot × SO-101 排错记录
 
-这个仓库记录我在 SO-101 真机上复刻 LeRobot 模仿学习流程的过程。当前完成到的范围是：使用 Leader–Follower 系统和两路相机采集示范数据，分别完成 ACT 与 Diffusion Policy 的基本训练和真机部署，并围绕环境、数据、显存、推理延迟和动作分块做了阶段性排查。
+这个分支不做“报错字符串大全”，而是按问题所在层级整理我在环境安装、数据采集、训练和真机部署中的判断过程。相同的最后一行报错可能由不同原因触发，因此每条记录都尽量保留时间顺序和日志证据。
 
-这里不是一份只保留“最终正确命令”的教程。我更希望保留当时看到的现象、最初的判断、日志如何改变判断，以及哪些问题目前仍没有足够证据下结论。
+[返回 `main` 项目导航](https://github.com/Zeil6/lerobot-so101-imitation-learning/tree/main)
 
-## 当前状态
+## 使用方式
 
-| 项目 | 状态 | 说明 |
-| --- | --- | --- |
-| ACT | 已完成基本复刻 | 已走通数据采集、训练、checkpoint 加载与真机测试流程 |
-| Diffusion Policy | 已完成基本复刻 | 已走通训练与真机部署，并定位到推理延迟对周期性停顿的影响 |
-| 系统性量化对比 | 进行中 | 尚未形成可信的成功率、完成时间和多 checkpoint 统计 |
-
-> 本仓库中的“完成”指基本流程已走通，不等于已经得到稳定、泛化良好的最终策略。没有日志或统计支撑的数据不会被补写。
-
-π0.5 与 SmolVLA 目前尚未完成，因此不列入已完成成果，也暂不创建对应分支。后续只有在实际跑通并保留足够实验记录后，才会补充相关内容。
-
-## 硬件与任务背景
-
-- Ubuntu + Conda + Python 3.12
-- LeRobot
-- SO-101 Leader 与 SO-101 Follower
-- Feetech 舵机总线
-- 两路 OpenCV 相机：`handeye` 与 `fixed`
-- 任务描述：`Grab the glue`
-- 训练设备：RTX 5060 Ti 16GB
-
-摄像头索引、串口名、校准文件和账号信息属于本地配置，不在仓库中固化。命令中的占位符需要按实际机器替换。
-
-## 分支导航
-
-| 分支 | 记录内容 |
-| --- | --- |
-| [`act-reproduction`](https://github.com/Zeil6/lerobot-so101-imitation-learning/tree/act-reproduction) | ACT 的环境、采集、训练、部署、问题定位和算法理解 |
-| [`diffusion-policy-reproduction`](https://github.com/Zeil6/lerobot-so101-imitation-learning/tree/diffusion-policy-reproduction) | Diffusion Policy 的训练部署、动作停顿分析、DDIM 调整和图像裁剪问题 |
-| [`debugging-notes`](https://github.com/Zeil6/lerobot-so101-imitation-learning/tree/debugging-notes) | 按环境、配置、数据、GPU 和真机通信分类的排错记录 |
-| [`algorithm-notes`](https://github.com/Zeil6/lerobot-so101-imitation-learning/tree/algorithm-notes) | ACT 与 Diffusion Policy 的原理、训练目标和工程差异 |
-| [`experiment-review`](https://github.com/Zeil6/lerobot-so101-imitation-learning/tree/experiment-review) | 实验方法、已有结论、待验证问题和下一轮对比计划 |
-
-## 推荐阅读顺序
-
-1. 先读 `act-reproduction`，了解数据从真机示范到策略部署的完整闭环。
-2. 再读 `diffusion-policy-reproduction`，重点看为什么“训练完成”仍可能不满足实时控制。
-3. 遇到具体报错时进入 `debugging-notes`，按照日志证据而不是错误字符串表面分类。
-4. 用 `algorithm-notes` 对齐两种策略的共同点与差异。
-5. 最后读 `experiment-review`，区分当前证据支持的结论和下一步假设。
-
-## 我目前形成的工作方式
-
-```mermaid
-flowchart TD
-    A[记录现象与完整日志] --> B[判断问题属于哪一层]
-    B --> C[一次只改变一个关键变量]
-    C --> D[用同一任务重新验证]
-    D --> E{证据是否足够}
-    E -- 是 --> F[写入阶段性结论]
-    E -- 否 --> G[保留为待验证假设]
+```text
+现象
+→ 第一判断
+→ 日志证据
+→ 排查步骤
+→ 真正原因
+→ 修复方法
+→ 验证方式
+→ 可以迁移到其他项目的经验
 ```
 
-我最初容易把真机表现差归因于“数据不够”。ACT 和 Diffusion Policy 的连续部署让我意识到，数据只是变量之一；控制频率、动作队列、图像预处理、推理耗时和硬件通信都会改变最终表现。这个仓库会持续保留这种判断被修正的过程。
+先用下面的分类定位问题，再进入 [`docs/cases.md`](docs/cases.md) 查看记录。
 
-## 后续计划
+| 类别 | 典型问题 | 首先确认 |
+| --- | --- | --- |
+| 环境与依赖 | Python 版本、editable install、Feetech extra、FFmpeg、下载中断、resolver | 解释器、pip、包版本和错误发生阶段 |
+| 命令与配置 | CLI 入口变化、YAML/字典、引号、参数名 | 本地 `--help` 和解析器停在哪一步 |
+| 数据采集 | 空 episode、方向键、相机断开、编码、Hub 401 | 事件时间线、本地落盘和远端上传 |
+| GPU 与训练 | OOM、batch size、碎片、AMP、双相机、恢复训练 | 峰值显存、其他进程、输入规模、checkpoint 元数据 |
+| 真机通信 | status packet、舵机 5 扭矩、串口、电源、ID、波特率 | 物理链路与总线配置，避免盲目重写舵机参数 |
 
-- 固定初始条件和评价口径，对多个 checkpoint 做重复真机测试。
-- 记录成功率、完成时间、停顿次数、抓取稳定性和失败后的恢复情况。
-- 重新检查双摄像头画面，确定合理裁剪区域后训练新的 Diffusion Policy checkpoint。
-- 比较 DDIM 10/16 步以及不同 `n_action_steps`，同时记录实际推理时间。
-- 评估动作块融合或轻量平滑是否必要，并避免把平滑造成的延迟误判为改进。
+## 快速诊断命令
 
-## 仓库边界
+```bash
+python --version
+which python
+python -m pip --version
+python -m pip check
+lerobot-record --help
+lerobot-train --help
+nvidia-smi
+ls -l /dev/ttyACM*
+v4l2-ctl --list-devices
+```
 
-本仓库不提交模型权重、完整数据集、Conda 环境、Hugging Face 缓存、本地校准文件、临时相机帧或任何 Token。若需要复现实验，应根据各分支中的环境与命令说明，在本地准备数据和配置。
+命令只负责收集证据，不等于自动修复。尤其是舵机通信错误，不应在未确认电源、线材、端口占用、ID 和波特率前重新运行配置命令；配置写入可能让原本局部的通信问题扩大。
+
+## 阶段性结论
+
+- 最后一条 traceback 经常只是清理或保存阶段的结果，第一个异常事件更接近根因。
+- 安装失败、配置解析失败、设备连接失败、训练失败和远端认证失败应该分层处理。
+- 能重新运行不等于已修复；验证必须回到原触发条件，并检查预期产物。
+
+## 尚未完成
+
+- 补充原始日志的日期、LeRobot commit/版本和最终修复所用的精确包版本。
+- 对 Feetech 通信问题增加经过万用表/替换线材验证的硬件记录。
+- 将无敏感信息的典型日志片段归档到 `logs/sanitized/`。
+
