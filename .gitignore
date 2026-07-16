@@ -270,3 +270,7 @@ camera_config.local.*
 credentials*.json
 auth*.json
 
+# Curated real-robot demos are intentionally versioned
+!assets/
+!assets/videos/
+!assets/videos/*.mp4
