@@ -216,3 +216,57 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# LeRobot / imitation-learning local artifacts
+outputs/
+checkpoints/
+checkpoint*/
+*.ckpt
+*.pt
+*.pth
+*.safetensors
+wandb/
+runs/
+logs/
+tensorboard/
+
+# Hugging Face caches and local credentials
+.cache/huggingface/
+huggingface/
+hf_cache/
+.huggingface/
+token
+tokens.json
+
+# Conda and local environments
+.conda/
+conda-env/
+environment-local.yml
+
+# Recorded datasets, encoded media, and temporary camera frames
+data/
+datasets/
+recordings/
+camera_frames/
+tmp_frames/
+*.mp4
+*.avi
+*.mkv
+
+# Machine-specific robot configuration and calibration
+calibration/
+calibration_private/
+robot_config.local.*
+camera_config.local.*
+*.local.toml
+*.local.yaml
+*.local.yml
+
+# Secrets and authentication files
+.env.*
+!.env.example
+*token*
+*secret*
+credentials*.json
+auth*.json
+
