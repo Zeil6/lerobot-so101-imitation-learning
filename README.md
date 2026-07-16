@@ -46,6 +46,18 @@
 4. 用 `algorithm-notes` 对齐两种策略的共同点与差异。
 5. 最后读 `experiment-review`，区分当前证据支持的结论和下一步假设。
 
+## 真机演示入口
+
+目前仓库收录了三段阶段性 SO-101 真机运行记录。视频分别保存在对应算法分支，`main` 只提供入口，不重复存放媒体文件。
+
+| 内容 | 训练数据 | 入口 |
+| --- | --- | --- |
+| ACT 真机演示 | 10 episodes | [进入 `act-reproduction`](https://github.com/Zeil6/lerobot-so101-imitation-learning/tree/act-reproduction#真机演示) |
+| Diffusion Policy 第一版 | 10 episodes，与 ACT 使用同一组数据 | [进入 `diffusion-policy-reproduction`](https://github.com/Zeil6/lerobot-so101-imitation-learning/tree/diffusion-policy-reproduction#不同数据规模下的真机演示) |
+| Diffusion Policy 第二版 | 重新采集的 50 episodes | [进入 `diffusion-policy-reproduction`](https://github.com/Zeil6/lerobot-so101-imitation-learning/tree/diffusion-policy-reproduction#不同数据规模下的真机演示) |
+
+ACT 与 Diffusion Policy 已完成基础复刻；π0.5 与 SmolVLA 仍未完成。三段视频只能说明相应训练和部署流程曾在真机上运行，仓库目前尚未提供具有严格统计意义的模型成功率比较。
+
 ## 我目前形成的工作方式
 
 ```mermaid
