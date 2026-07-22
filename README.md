@@ -1,85 +1,81 @@
-# LeRobot × SO-101 模仿学习复刻记录
+# In-depth Analysis of Source Code
 
-这个仓库记录我在 SO-101 真机上复刻 LeRobot 模仿学习流程的过程。当前完成到的范围是：使用 Leader–Follower 系统和两路相机采集示范数据，分别完成 ACT 与 Diffusion Policy 的基本训练和真机部署，并围绕环境、数据、显存、推理延迟和动作分块做了阶段性排查。
+最开始我把“ACT 已经复现”理解成：训练命令能跑、checkpoint 能加载、SO-101 能动起来。继续追到 `select_action()` 后，我才发现模型吐出一整段动作，只完成了“后厨备菜”；这段动作怎样被截取、放进 queue、逐帧取出，或者被 Temporal Ensembling 重新融合，才决定机器人这一帧真正吃到什么。🤖
 
-这里不是一份只保留“最终正确命令”的教程。我更希望保留当时看到的现象、最初的判断、日志如何改变判断，以及哪些问题目前仍没有足够证据下结论。
+这个分支把我在 `Grab the glue` 任务之后继续核对的 ACT 源码整理成可复查的阅读笔记。重点不是把 `modeling_act.py` 翻译一遍，而是把训练、普通 action queue 推理和 Temporal Ensembling 三条数据流拆开，再把每个判断落回实际类、函数、张量和配置字段。
 
-## 当前状态
+[返回 `main` 项目导航](https://github.com/Zeil6/lerobot-so101-imitation-learning/tree/main)
 
-| 项目 | 状态 | 说明 |
+## 源码核对基线
+
+检查日期：**2026-07-22**。
+
+| 来源 | 固定版本 | 说明 |
 | --- | --- | --- |
-| ACT | 已完成基本复刻 | 已走通数据采集、训练、checkpoint 加载与真机测试流程 |
-| Diffusion Policy | 已完成基本复刻 | 已走通训练与真机部署，并定位到推理延迟对周期性停顿的影响 |
-| 系统性量化对比 | 进行中 | 尚未形成可信的成功率、完成时间和多 checkpoint 统计 |
+| Hugging Face LeRobot | [`1427d35ef58ab46651dc7ef78bde81642090c861`](https://github.com/huggingface/lerobot/tree/1427d35ef58ab46651dc7ef78bde81642090c861) | 本次整理使用的源码核对基线 |
+| ACT 原始官方代码 | [`742c753c0d4a5d87076c8f69e5628c79a8cc5488`](https://github.com/tonyzhaozh/act/tree/742c753c0d4a5d87076c8f69e5628c79a8cc5488) | 核对原始训练、DETRVAE、temporal aggregation 与部署循环 |
+| ACT 论文 | [Learning Fine-Grained Bimanual Manipulation with Low-Cost Hardware](https://arxiv.org/abs/2304.13705) | 核对 action chunking、CVAE 与 temporal ensemble 的原始动机 |
 
-> 本仓库中的“完成”指基本流程已走通，不等于已经得到稳定、泛化良好的最终策略。没有日志或统计支撑的数据不会被补写。
+仓库 `algorithm-notes` 分支在 2026-07-16 使用过 LeRobot `3f2179f` 作为检查基线。本次换到 2026-07-21 的上游 commit `1427d35e` 重新核对：`act_training_example.py`、`configuration_act.py` 与 `modeling_act.py` 的 blob SHA 相同；`processor_act.py` 从“显式列出各 processor step”重构为调用 `make_default_pre_post_processors()`，归一化/反归一化职责没有改变，但序列化细节仍可能存在版本差异。两个 SHA 都**不是**我当时训练 checkpoint 对应版本的证明。实验版本仍要从本地环境、`config.json` 或 checkpoint metadata 追溯。
 
-π0.5 与 SmolVLA 目前尚未完成，因此不列入已完成成果，也暂不创建对应分支。后续只有在实际跑通并保留足够实验记录后，才会补充相关内容。
-
-## 硬件与任务背景
-
-- Ubuntu + Conda + Python 3.12
-- LeRobot
-- SO-101 Leader 与 SO-101 Follower
-- Feetech 舵机总线
-- 两路 OpenCV 相机：`handeye` 与 `fixed`
-- 任务描述：`Grab the glue`
-- 训练设备：RTX 5060 Ti 16GB
-
-摄像头索引、串口名、校准文件和账号信息属于本地配置，不在仓库中固化。命令中的占位符需要按实际机器替换。
-
-## 分支导航
-
-| 分支 | 记录内容 |
-| --- | --- |
-| [`act-reproduction`](https://github.com/Zeil6/lerobot-so101-imitation-learning/tree/act-reproduction) | ACT 的环境、采集、训练、部署、问题定位和算法理解 |
-| [`diffusion-policy-reproduction`](https://github.com/Zeil6/lerobot-so101-imitation-learning/tree/diffusion-policy-reproduction) | Diffusion Policy 的训练部署、动作停顿分析、DDIM 调整和图像裁剪问题 |
-| [`debugging-notes`](https://github.com/Zeil6/lerobot-so101-imitation-learning/tree/debugging-notes) | 按环境、配置、数据、GPU 和真机通信分类的排错记录 |
-| [`algorithm-notes`](https://github.com/Zeil6/lerobot-so101-imitation-learning/tree/algorithm-notes) | ACT 与 Diffusion Policy 的原理、训练目标和工程差异 |
-| [`experiment-review`](https://github.com/Zeil6/lerobot-so101-imitation-learning/tree/experiment-review) | 实验方法、已有结论、待验证问题和下一轮对比计划 |
-
-## 推荐阅读顺序
-
-1. 先读 `act-reproduction`，了解数据从真机示范到策略部署的完整闭环。
-2. 再读 `diffusion-policy-reproduction`，重点看为什么“训练完成”仍可能不满足实时控制。
-3. 遇到具体报错时进入 `debugging-notes`，按照日志证据而不是错误字符串表面分类。
-4. 用 `algorithm-notes` 对齐两种策略的共同点与差异。
-5. 最后读 `experiment-review`，区分当前证据支持的结论和下一步假设。
-
-## 真机演示入口
-
-目前仓库收录了三段阶段性 SO-101 真机运行记录。视频分别保存在对应算法分支，`main` 只提供入口，不重复存放媒体文件。
-
-| 内容 | 训练数据 | 入口 |
-| --- | --- | --- |
-| ACT 真机演示 | 10 episodes | [进入 `act-reproduction`](https://github.com/Zeil6/lerobot-so101-imitation-learning/tree/act-reproduction#真机演示) |
-| Diffusion Policy 第一版 | 10 episodes，与 ACT 使用同一组数据 | [进入 `diffusion-policy-reproduction`](https://github.com/Zeil6/lerobot-so101-imitation-learning/tree/diffusion-policy-reproduction#不同数据规模下的真机演示) |
-| Diffusion Policy 第二版 | 重新采集的 50 episodes | [进入 `diffusion-policy-reproduction`](https://github.com/Zeil6/lerobot-so101-imitation-learning/tree/diffusion-policy-reproduction#不同数据规模下的真机演示) |
-
-ACT 与 Diffusion Policy 已完成基础复刻；π0.5 与 SmolVLA 仍未完成。三段视频只能说明相应训练和部署流程曾在真机上运行，仓库目前尚未提供具有严格统计意义的模型成功率比较。
-
-## 我目前形成的工作方式
+## 训练与推理总览
 
 ```mermaid
 flowchart TD
-    A[记录现象与完整日志] --> B[判断问题属于哪一层]
-    B --> C[一次只改变一个关键变量]
-    C --> D[用同一任务重新验证]
-    D --> E{证据是否足够}
-    E -- 是 --> F[写入阶段性结论]
-    E -- 否 --> G[保留为待验证假设]
+    D["LeRobotDataset sample"] --> P["preprocessor：batch / normalize / device"]
+    P --> F["ACTPolicy.forward"]
+    F --> M["ACT：CVAE + backbone + Transformer"]
+    M --> L["masked L1 + KL"]
+    L --> U["backward + optimizer.step"]
+    P --> S["ACTPolicy.select_action"]
+    S --> Q{"Temporal Ensembling?"}
+    Q -- "否" --> AQ["chunk → queue → popleft"]
+    Q -- "是" --> TE["每步预测 chunk → update 融合"]
 ```
 
-我最初容易把真机表现差归因于“数据不够”。ACT 和 Diffusion Policy 的连续部署让我意识到，数据只是变量之一；控制频率、动作队列、图像预处理、推理耗时和硬件通信都会改变最终表现。这个仓库会持续保留这种判断被修正的过程。
+同一个 `ACT` 神经网络会参与训练和推理，但外围调用方式不同：
 
-## 后续计划
+- 训练时，`forward()` 需要真实 action chunk 来构造 CVAE latent，并计算监督损失。
+- 普通推理时，`predict_action_chunk()` 先生成完整 chunk，`select_action()` 只缓存并返回一个动作。
+- Temporal Ensembling 开启时，每个控制时刻都重新预测 chunk，再把多次预测中落到“当前时刻”的动作融合；它不走普通 queue。
 
-- 固定初始条件和评价口径，对多个 checkpoint 做重复真机测试。
-- 记录成功率、完成时间、停顿次数、抓取稳定性和失败后的恢复情况。
-- 重新检查双摄像头画面，确定合理裁剪区域后训练新的 Diffusion Policy checkpoint。
-- 比较 DDIM 10/16 步以及不同 `n_action_steps`，同时记录实际推理时间。
-- 评估动作块融合或轻量平滑是否必要，并避免把平滑造成的延迟误判为改进。
+## 文档入口
 
-## 仓库边界
+| 笔记 | 核心问题 |
+| --- | --- |
+| [01 · 训练入口](docs/01_training_entry.md) | `act_training_example.py` 怎样把 Dataset、processor、Policy、loss、optimizer 和保存串起来 |
+| [02 · Policy 训练与推理接口](docs/02_policy_inference.md) | `forward()`、`predict_action_chunk()`、`select_action()` 分别负责什么 |
+| [03 · action chunk 与 action queue](docs/03_action_chunk_and_queue.md) | “模型预测的一段动作”和“待执行缓存”为什么不是同一回事 |
+| [04 · Temporal Ensembling](docs/04_temporal_ensembling.md) | `ACTTemporalEnsembler.update()` 如何在线融合重叠预测 |
+| [05 · Transformer 层](docs/05_transformer_layers.md) | `ACTEncoderLayer.forward()` 与 `ACTDecoderLayer.forward()` 的实际数据流 |
+| [06 · 原始 ACT 对照](docs/06_original_act_comparison.md) | LeRobot 的通用封装与 ALOHA 原始实现在哪些地方相同、哪些地方不同 |
+| [07 · 源码地图](docs/07_source_map.md) | 固定 commit、文件路径、关键符号和完整调用链 |
 
-本仓库不提交模型权重、完整数据集、Conda 环境、Hugging Face 缓存、本地校准文件、临时相机帧或任何 Token。若需要复现实验，应根据各分支中的环境与命令说明，在本地准备数据和配置。
+## 推荐阅读顺序
+
+1. 从[训练入口](docs/01_training_entry.md)看清一批示范数据怎样变成一次参数更新。
+2. 接着读[Policy 训练与推理接口](docs/02_policy_inference.md)，把 `forward()` 和 `select_action()` 分家。
+3. 用[action chunk 与 queue](docs/03_action_chunk_and_queue.md)理解部署时的 receding-horizon 权衡。
+4. 再读[Temporal Ensembling](docs/04_temporal_ensembling.md)。它不是 queue 上多加一行平均，而是另一条推理路径。
+5. 最后进入[Transformer 层](docs/05_transformer_layers.md)和[原始实现对照](docs/06_original_act_comparison.md)。
+
+## 已确认的结论
+
+- `ACTPolicy.forward()` 返回 `(loss, loss_dict)`，不是动作；真正的动作预测在底层 `ACT.forward()` 中产生，再被用于计算 masked L1 与 KL。
+- `predict_action_chunk()` 返回完整的 `[B, chunk_size, A]` 动作序列，但当前源码没有在该函数内反归一化，也不会直接给机器人下指令。
+- 普通 `select_action()` 只在 queue 为空时调用模型，截取前 `n_action_steps`，随后每次 `popleft()` 一个 `[B, A]` 动作。
+- `chunk_size` 是模型预测长度；`n_action_steps` 是普通 queue 模式一次实际保留的长度。后半段可以被丢弃。
+- `temporal_ensemble_coeff` 默认是 `None`，即 Temporal Ensembling 默认关闭；开启时要求 `n_action_steps=1`。
+- 当前实现中，正的 Temporal Ensembling 系数给**旧预测**更高权重，负值才偏重新预测。
+- `ACTDecoderLayer` 的 self-attention 让动作查询彼此交流，cross-attention 再读取图像、robot state 与 latent 组成的 encoder memory。
+- LeRobot 默认 `n_decoder_layers=1`，是为了匹配原始代码“虽然构造 7 层，但 action head 最终取 decoder stack 的第 0 层输出”的实际行为。
+
+## 仍需核对的问题
+
+- 我的 ACT checkpoint 对应的精确 LeRobot tag/commit、`chunk_size`、`n_action_steps` 与 `temporal_ensemble_coeff` 保存值。
+- SO-101 数据集当时保存的 state/action 维度与全部 feature 名称；本文对 `S`、`A` 使用符号表达，典型 6 维只作为待元数据确认的例子。
+- 训练命令实际走的 processor 版本是否与本次基线完全一致。
+- Temporal Ensembling 在 `Grab the glue` 任务中的独立贡献；我尚未做开关消融，不能用现有视频代替这个实验。
+- 不同 `n_action_steps` 对闭环纠偏、推理频率和真机连续性的量化影响。
+
+> ⚠️ 这里记录的是“本次整理进一步核对到的源码事实”。我没有修改 LeRobot 的 ACT 模型源码，也没有把后来读到的新版本实现倒推成旧 checkpoint 已经使用的行为。
