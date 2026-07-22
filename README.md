@@ -10,6 +10,7 @@
 | --- | --- | --- |
 | ACT | 已完成基本复刻 | 已走通数据采集、训练、checkpoint 加载与真机测试流程 |
 | Diffusion Policy | 已完成基本复刻 | 已走通训练与真机部署，并定位到推理延迟对周期性停顿的影响 |
+| ACT 源码分析 | 已完成首轮整理 | 已梳理训练入口、Policy 推理接口、action chunk/queue、Temporal Ensembling 与 Transformer 数据流 |
 | 系统性量化对比 | 进行中 | 尚未形成可信的成功率、完成时间和多 checkpoint 统计 |
 
 > 本仓库中的“完成”指基本流程已走通，不等于已经得到稳定、泛化良好的最终策略。没有日志或统计支撑的数据不会被补写。
@@ -36,6 +37,7 @@
 | [`diffusion-policy-reproduction`](https://github.com/Zeil6/lerobot-so101-imitation-learning/tree/diffusion-policy-reproduction) | Diffusion Policy 的训练部署、动作停顿分析、DDIM 调整和图像裁剪问题 |
 | [`debugging-notes`](https://github.com/Zeil6/lerobot-so101-imitation-learning/tree/debugging-notes) | 按环境、配置、数据、GPU 和真机通信分类的排错记录 |
 | [`algorithm-notes`](https://github.com/Zeil6/lerobot-so101-imitation-learning/tree/algorithm-notes) | ACT 与 Diffusion Policy 的原理、训练目标和工程差异 |
+| [`in-depth-source-code-analysis`](https://github.com/Zeil6/lerobot-so101-imitation-learning/tree/in-depth-source-code-analysis) | ACT 源码调用链：训练入口、`forward()`/`select_action()`、action chunk 与 queue、Temporal Ensembling、Transformer 层及原始 ACT 对照 |
 | [`experiment-review`](https://github.com/Zeil6/lerobot-so101-imitation-learning/tree/experiment-review) | 实验方法、已有结论、待验证问题和下一轮对比计划 |
 
 ## 推荐阅读顺序
@@ -44,7 +46,8 @@
 2. 再读 `diffusion-policy-reproduction`，重点看为什么“训练完成”仍可能不满足实时控制。
 3. 遇到具体报错时进入 `debugging-notes`，按照日志证据而不是错误字符串表面分类。
 4. 用 `algorithm-notes` 对齐两种策略的共同点与差异。
-5. 最后读 `experiment-review`，区分当前证据支持的结论和下一步假设。
+5. 进入 `in-depth-source-code-analysis`，沿真实调用链继续追踪 ACT 的训练、动作生成、queue 与 Temporal Ensembling。
+6. 最后读 `experiment-review`，区分当前证据支持的结论和下一步假设。
 
 ## 真机演示入口
 
