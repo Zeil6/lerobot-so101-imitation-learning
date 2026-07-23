@@ -1,6 +1,6 @@
 # 01 · 从 `act_training_example.py` 看一次训练更新
 
-[返回分支入口](../README.md) · [下一篇：Policy 训练与推理接口](02_policy_inference.md)
+[返回分支入口](../README.md) · [下一步：`preprocessor(batch)`](09_preprocessor_batch.md) · [Policy 训练与推理接口](02_policy_inference.md)
 
 源码位置：[`examples/tutorial/act/act_training_example.py`](https://github.com/huggingface/lerobot/blob/1427d35ef58ab46651dc7ef78bde81642090c861/examples/tutorial/act/act_training_example.py)。这个文件在本次 LeRobot 基线中真实存在，不是我根据训练命令拼出的伪代码。
 
@@ -70,7 +70,7 @@ preprocessor, postprocessor = make_pre_post_processors(
 - postprocessor 负责动作反归一化与移回 CPU；
 - 训练循环只调用 preprocessor，因为 loss 在归一化空间内计算；postprocessor 被保存下来，留给部署端把模型输出还原到机器人动作尺度。
 
-这修正了我一开始容易产生的错觉：不是 `modeling_act.py` 里的每个推理函数都会自己处理归一化。当前工程把这层职责放在 processor pipeline。
+这修正了我一开始容易产生的错觉：不是 `modeling_act.py` 里的每个推理函数都会自己处理归一化。当前工程把这层职责放在 processor pipeline。具体的 factory 调用、四个 preprocessor Step、两个 postprocessor Step，以及训练 batch 和单条推理 observation 的差别，单独整理在 [09 · `preprocessor(batch)`](09_preprocessor_batch.md)。
 
 ## optimizer 到底更新什么
 

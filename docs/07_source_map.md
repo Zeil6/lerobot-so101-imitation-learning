@@ -1,6 +1,6 @@
 # 07 · 源码地图、调用链与版本边界
 
-[上一篇：原始 ACT 对照](06_original_act_comparison.md) · [返回分支入口](../README.md)
+[上一篇：原始 ACT 对照](06_original_act_comparison.md) · [返回分支入口](../README.md) · [下一篇：数据闭环](08_data_closed_loop.md)
 
 这页给前面各篇做“地图索引”。当结论与未来版本不一致时，先沿固定 commit 链接回到代码，不靠记忆补全。
 
@@ -14,7 +14,14 @@
 | 同上 | `ACTTemporalEnsembler` | 指数权重、在线平均、时间对齐与消费 |
 | 同上 | `ACT` | latent encoder、ResNet、主 Encoder/Decoder、action head |
 | 同上 | `ACTEncoderLayer`, `ACTDecoderLayer` | attention、FFN、residual、norm、position embedding |
-| [`processor_act.py`](https://github.com/huggingface/lerobot/blob/1427d35ef58ab46651dc7ef78bde81642090c861/src/lerobot/policies/act/processor_act.py) | `make_act_pre_post_processors()` | normalization、batch/device、动作 unnormalization |
+| [`policies/factory.py`](https://github.com/huggingface/lerobot/blob/1427d35ef58ab46651dc7ef78bde81642090c861/src/lerobot/policies/factory.py) | `make_pre_post_processors()`, `_make_processors_from_policy_config()` | 创建或加载 pipeline，并按 Policy 类型解析 ACT factory |
+| [`processor_act.py`](https://github.com/huggingface/lerobot/blob/1427d35ef58ab46651dc7ef78bde81642090c861/src/lerobot/policies/act/processor_act.py) | `make_act_pre_post_processors()` | ACT 在当前基线中调用通用 pre/post helper |
+| [`processor/factory.py`](https://github.com/huggingface/lerobot/blob/1427d35ef58ab46651dc7ef78bde81642090c861/src/lerobot/processor/factory.py) | `make_default_policy_processor_steps()`, `make_default_pre_post_processors()` | 固定 `Rename → Batch → Device → Normalize` 与 `Unnormalize → CPU` 顺序 |
+| [`processor/pipeline.py`](https://github.com/huggingface/lerobot/blob/3f2179f3b69708b6ad009b2e7685dd9d05269ee1/src/lerobot/processor/pipeline.py) | `PolicyProcessorPipeline`, `DataProcessorPipeline.__call__()` | 输入转 `EnvTransition`、按顺序执行 Step、再转回输出 |
+| [`rename_processor.py`](https://github.com/huggingface/lerobot/blob/3f2179f3b69708b6ad009b2e7685dd9d05269ee1/src/lerobot/processor/rename_processor.py) | `RenameObservationsProcessorStep` | 空 `rename_map` 保留原字段名 |
+| [`batch_processor.py`](https://github.com/huggingface/lerobot/blob/3f2179f3b69708b6ad009b2e7685dd9d05269ee1/src/lerobot/processor/batch_processor.py) | `AddBatchDimensionProcessorStep` | 按 Tensor 维数判断是否补 batch 维 |
+| [`device_processor.py`](https://github.com/huggingface/lerobot/blob/3f2179f3b69708b6ad009b2e7685dd9d05269ee1/src/lerobot/processor/device_processor.py) | `DeviceProcessorStep` | Tensor device 与可选 dtype 迁移，不负责机器人通信 |
+| [`normalize_processor.py`](https://github.com/huggingface/lerobot/blob/3f2179f3b69708b6ad009b2e7685dd9d05269ee1/src/lerobot/processor/normalize_processor.py) | `NormalizerProcessorStep`, `UnnormalizerProcessorStep` | 按 feature type、mapping 与 stats 做正反变换 |
 | [`pretrained.py`](https://github.com/huggingface/lerobot/blob/1427d35ef58ab46651dc7ef78bde81642090c861/src/lerobot/policies/pretrained.py) | `PreTrainedPolicy.save_pretrained()` | `config.json` 与 `model.safetensors` 保存 |
 
 ## ACT 原始官方代码路径
@@ -63,7 +70,7 @@ flowchart TD
 
 关键源码节点：
 
-1. [Dataset、processor 与 DataLoader](https://github.com/huggingface/lerobot/blob/1427d35ef58ab46651dc7ef78bde81642090c861/examples/tutorial/act/act_training_example.py#L27-L75)
+1. [Dataset、processor 与 DataLoader](https://github.com/huggingface/lerobot/blob/1427d35ef58ab46651dc7ef78bde81642090c861/examples/tutorial/act/act_training_example.py#L27-L75)，Step 级拆解见 [09 · `preprocessor(batch)`](09_preprocessor_batch.md)
 2. [`ACTPolicy.forward()` loss](https://github.com/huggingface/lerobot/blob/1427d35ef58ab46651dc7ef78bde81642090c861/src/lerobot/policies/act/modeling_act.py#L123-L154)
 3. [`ACT.forward()` latent 分支](https://github.com/huggingface/lerobot/blob/1427d35ef58ab46651dc7ef78bde81642090c861/src/lerobot/policies/act/modeling_act.py#L367-L460)
 4. [图像/state token 与 Transformer](https://github.com/huggingface/lerobot/blob/1427d35ef58ab46651dc7ef78bde81642090c861/src/lerobot/policies/act/modeling_act.py#L461-L518)
@@ -116,7 +123,8 @@ flowchart TD
 
 - 2026-07-16 的 `algorithm-notes` 使用 LeRobot `3f2179f`；本分支在 2026-07-22 使用 `1427d35e` 重新检查。
 - `act_training_example.py`、`configuration_act.py` 与 `modeling_act.py` 在两次基线中的 blob SHA 相同。
-- `processor_act.py` 已从显式组装 processor steps 重构为调用通用 helper；两版文档字符串都说明 preprocessor 负责 normalization/batch/device，postprocessor 负责 unnormalization/CPU，但 checkpoint 对应的具体 processor 资产仍要按实验版本读取。
+- 聊天上传的 `processor_act.py` 显式组装 processor steps，上传文件本身没有 commit metadata；其结构与固定 commit `3f2179f3b69708b6ad009b2e7685dd9d05269ee1` 的函数、顺序和关键参数一致，但不能因此声称 blob 完全相同。
+- 到 `1427d35e`，`processor_act.py` 已重构为调用通用 helper；同 commit 的 `processor/factory.py` 明确保留相同的四步 preprocessor 与两步 postprocessor 顺序。checkpoint 对应的具体 processor 资产仍要按实验版本读取。
 - ACT 核心结论只对这里列出的固定 commit 负责；后续 LeRobot 可能继续移动 normalization、processor 或 Policy API。
 - 我的 ACT 训练 checkpoint 没有在仓库中保存精确上游 SHA，所以本文只称“源码核对基线”，不称“实验版本”。
 

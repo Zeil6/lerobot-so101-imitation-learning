@@ -1,6 +1,6 @@
 # 02 · `forward()`、`predict_action_chunk()` 与 `select_action()`
 
-[上一篇：训练入口](01_training_entry.md) · [返回分支入口](../README.md) · [下一篇：action chunk 与 queue](03_action_chunk_and_queue.md)
+[前置：`preprocessor(batch)`](09_preprocessor_batch.md) · [返回分支入口](../README.md) · [下一篇：action chunk 与 queue](03_action_chunk_and_queue.md)
 
 这三个函数挨得很近，第一次看时很容易把它们理解成“都是让 ACT 往前跑一下”。实际职责差得很大：
 
@@ -14,7 +14,7 @@ select_action()         控制循环：决定当前这一帧返回哪个动作
 
 ## 调用前：normalization 在哪里
 
-当前 LeRobot 把 normalization 放在 Policy 外部的 processor pipeline。部署端应先用 preprocessor 处理 observation，再调用 `select_action()`；得到动作后，再交给 postprocessor 反归一化、移回 CPU。
+当前 LeRobot 把 normalization 放在 Policy 外部的 processor pipeline。部署端应先用 preprocessor 处理 observation，再调用 `select_action()`；得到动作后，再交给 postprocessor 反归一化、移回 CPU。Step 的实际顺序、条件补 batch 维和版本边界见 [09 · `preprocessor(batch)`](09_preprocessor_batch.md)。
 
 因此以下三个函数接收/输出的都是**模型空间**数据：
 

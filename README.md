@@ -2,13 +2,13 @@
 
 最开始我把“ACT 已经复现”理解成：训练命令能跑、checkpoint 能加载、SO-101 能动起来。继续追到 `select_action()` 后，我才发现模型吐出一整段动作，只完成了“后厨备菜”；这段动作怎样被截取、放进 queue、逐帧取出，或者被 Temporal Ensembling 重新融合，才决定机器人这一帧真正吃到什么。🤖
 
-这个分支把我在 `Grab the glue` 任务之后继续核对的 ACT 源码整理成可复查的阅读笔记。重点不是把 `modeling_act.py` 翻译一遍，而是把训练、普通 action queue 推理和 Temporal Ensembling 三条数据流拆开，再把每个判断落回实际类、函数、张量和配置字段。
+这个分支把我在 `Grab the glue` 任务之后继续核对的 ACT 源码整理成可复查的阅读笔记。重点不是把 `modeling_act.py` 翻译一遍，而是从 Dataset、processor、训练与推理一路追到真机反馈：既拆开普通 action queue 和 Temporal Ensembling，也把“数据怎样进入模型”与“失败怎样指导下一轮采集”接成完整闭环。每个判断都尽量落回实际类、函数、张量、配置字段或真实实验边界。
 
 [返回 `main` 项目导航](https://github.com/Zeil6/lerobot-so101-imitation-learning/tree/main)
 
 ## 源码核对基线
 
-检查日期：**2026-07-22**。
+检查日期：**2026-07-23**。
 
 | 来源 | 固定版本 | 说明 |
 | --- | --- | --- |
@@ -17,6 +17,8 @@
 | ACT 论文 | [Learning Fine-Grained Bimanual Manipulation with Low-Cost Hardware](https://arxiv.org/abs/2304.13705) | 核对 action chunking、CVAE 与 temporal ensemble 的原始动机 |
 
 仓库 `algorithm-notes` 分支在 2026-07-16 使用过 LeRobot `3f2179f` 作为检查基线。本次换到 2026-07-21 的上游 commit `1427d35e` 重新核对：`act_training_example.py`、`configuration_act.py` 与 `modeling_act.py` 的 blob SHA 相同；`processor_act.py` 从“显式列出各 processor step”重构为调用 `make_default_pre_post_processors()`，归一化/反归一化职责没有改变，但序列化细节仍可能存在版本差异。两个 SHA 都**不是**我当时训练 checkpoint 对应版本的证明。实验版本仍要从本地环境、`config.json` 或 checkpoint metadata 追溯。
+
+本次增量继续以聊天中上传的 `processor_act.py` 为主要学习对象。它的显式 Step 顺序与固定 commit `3f2179f3b69708b6ad009b2e7685dd9d05269ee1` 的结构和关键参数一致；由于上传文件没有 Git metadata，我只记录“结构核对一致”，不擅自把它认领为该 commit 的同一 blob。
 
 ## 训练与推理总览
 
@@ -50,14 +52,18 @@ flowchart TD
 | [05 · Transformer 层](docs/05_transformer_layers.md) | `ACTEncoderLayer.forward()` 与 `ACTDecoderLayer.forward()` 的实际数据流 |
 | [06 · 原始 ACT 对照](docs/06_original_act_comparison.md) | LeRobot 的通用封装与 ALOHA 原始实现在哪些地方相同、哪些地方不同 |
 | [07 · 源码地图](docs/07_source_map.md) | 固定 commit、文件路径、关键符号和完整调用链 |
+| [08 · 数据闭环](docs/08_data_closed_loop.md) | 从采集、Dataset、训练和部署回到失败分类与下一轮定向补采，区分已完成实验与计划 |
+| [09 · `preprocessor(batch)`](docs/09_preprocessor_batch.md) | 沿真实 factory 与 Processor Step 拆开字段、batch 维、device、normalization 和 postprocessor |
 
 ## 推荐阅读顺序
 
-1. 从[训练入口](docs/01_training_entry.md)看清一批示范数据怎样变成一次参数更新。
-2. 接着读[Policy 训练与推理接口](docs/02_policy_inference.md)，把 `forward()` 和 `select_action()` 分家。
-3. 用[action chunk 与 queue](docs/03_action_chunk_and_queue.md)理解部署时的 receding-horizon 权衡。
-4. 再读[Temporal Ensembling](docs/04_temporal_ensembling.md)。它不是 queue 上多加一行平均，而是另一条推理路径。
-5. 最后进入[Transformer 层](docs/05_transformer_layers.md)和[原始实现对照](docs/06_original_act_comparison.md)。
+1. 从[训练入口](docs/01_training_entry.md)认清 Dataset、DataLoader 和一次参数更新。
+2. 沿着 batch 进入[`preprocessor(batch)`](docs/09_preprocessor_batch.md)，看它怎样经过 Rename、Batch、Device 与 Normalize，再交给 `ACTPolicy.forward()`。
+3. 接着读[Policy 训练与推理接口](docs/02_policy_inference.md)，把 `forward()`、`predict_action_chunk()` 和 `select_action()` 分家。
+4. 用[action chunk 与 queue](docs/03_action_chunk_and_queue.md)和[Temporal Ensembling](docs/04_temporal_ensembling.md)理解两条部署路径。
+5. 再进入[Transformer 层](docs/05_transformer_layers.md)与[原始实现对照](docs/06_original_act_comparison.md)，把模型内部和工程封装对上。
+6. 回到[数据闭环](docs/08_data_closed_loop.md)：从真机失败判断数据覆盖，并把定向补采明确写成下一轮计划。
+7. 需要核对文件、类名或版本时，使用[源码地图](docs/07_source_map.md)回到固定 commit。
 
 ## 已确认的结论
 
